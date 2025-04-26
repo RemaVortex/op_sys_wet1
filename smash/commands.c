@@ -286,7 +286,6 @@ int getNextJobId(JobList* jobList) {
 
     Job* current = jobList->head;
 
-    // Mark used IDs
     while (current) {
         if (current->job_id >= 1 && current->job_id < JOBS_NUM_MAX) {
             ids[current->job_id] = true;
@@ -301,7 +300,7 @@ int getNextJobId(JobList* jobList) {
         }
     }
 
-    return JOBS_NUM_MAX; // All IDs taken (overflow case)
+    return JOBS_NUM_MAX; // All IDs taken, dont forget to chaeck this state
 }
 
 
