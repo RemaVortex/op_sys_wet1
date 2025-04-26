@@ -89,11 +89,12 @@ typedef struct Job {
     char* j_command;
     pid_t pid;
     time_t time_added;
-    time_t seconds_elapsed; //difftime(now, job->time_added);
+    time_t time_stoped; //difftime(now, job->time_added);
     int is_stopped;
+    bool isFirst;            //remember first stopped_time (relevant for multiple 'job' commands for stopped prcoess)
+
     struct Job* next;//linked list
 } Job;
-
 typedef struct JobList{
     Job* head;
 } JobList;
