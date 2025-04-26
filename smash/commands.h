@@ -65,12 +65,21 @@ typedef enum {
 
 
 
+// typedef struct Command {
+//     char* full_input;            //user_input
+//     char* command_name;
+//     char* arguments[ARGS_NUM_MAX];
+//     int argument_count;
+//     bool is_background;          //&
+// } Command;
 typedef struct Command {
-    char* full_input;            //user_input
-    char* command_name;
-    char* arguments[ARGS_NUM_MAX];
-    int argument_count;
-    bool is_background;          //&
+    char* full_input;
+    struct {
+        char* name;
+        char* args[ARGS_NUM_MAX];
+        int arg_count;
+    } parsed;
+    bool is_background;
 } Command;
 
 
