@@ -377,4 +377,329 @@ void removeBackgroundFinishedJobs(JobList* jobList) {
     }
 }
 
+int _pwd(Command* command, JobList* jobList){
+    if(command->parsed.arg_count>0){
+        fprintf(stderr, "smash error: pwd: expected 0 arguments\n");
+        return SMASH_FAIL;
+    }
+    char cwd[CMD_LENGTH_MAX];
+    if(getcwd(cwd, sizeof(cwd))==NULL){
+        perror("smash error: getcwd failed");
+        return SMASH_FAIL;//throw
+    }
+    if(command ->is_background){
+        pid_t pid =fork();
+        if(pid<0){
+            perror("smash error: fork failed");
+            exit(SMASH_FAIL);//throw
+        }
+        if(pid==0){
+            setpgrp();
+            printf("%s\n", cwd);
+            exit(SMASH_SUCCESS);//throw
+        }else{
+            addJob(jobList, pid, command->full_input, false);//this command come from parent, so add his child ;)
+            return SMASH_SUCCESS;
+        }
+    }
+    printf("%s\n", cwd);
+    return SMASH_SUCCESS;
+}
+static int compareJobsById(const void* a, const void* b) {
+    const Job* jobA = *(const Job**)a;
+    const Job* jobB = *(const Job**)b;
+    return (jobA->job_id - jobB->job_id);
+}
+
+// Helper to calculate elapsed time for a job
+static double _calculateElapsedTime(Job* job, time_t now) {
+    if (job->is_stopped) {
+        if (job->isFirst) {
+            job->time_stoped = now;
+            job->isFirst = false;
+        }
+        return difftime(job->time_stoped, job->time_added);
+    }
+    return difftime(now, job->time_added);
+}
+
+// Helper to print one job
+static void _printJobDetails(Job* job, double elapsed) {
+    printf("[%d] %s: %d %d secs %s\n",
+           job->job_id,
+           job->j_command,
+           job->pid,
+           (int)elapsed,
+           job->is_stopped ? "(stopped)" : "");
+}
+
+int _printJobList(Command* command, JobList* jobList) {
+    if (command->parsed.arg_count > 0) {
+        fprintf(stderr, "smash error: jobs: expected 0 arguments\n");
+        return INVALID_COMMAND;
+    }
+
+    if (!jobList || !jobList->head) {
+        printf("\n");
+        return SMASH_SUCCESS;
+    }
+
+    // Count jobs
+    int count = 0;
+    for (Job* temp = jobList->head; temp; temp = temp->next) {
+        count++;
+    }
+
+    if (count == 0) {
+        printf("\n");
+        return SMASH_SUCCESS;
+    }
+
+    // Prepare array for sorting
+    Job** jobs = MALLOC_VALIDATED(Job*, count);
+    Job* temp = jobList->head;
+    for (int i = 0; i < count; ++i) {
+        jobs[i] = temp;
+        temp = temp->next;
+    }
+
+    qsort(jobs, count, sizeof(Job*), compareJobsById);
+
+    time_t now = time(NULL);
+
+    for (int i = 0; i < count; ++i) {
+        Job* job = jobs[i];
+        double elapsed = _calculateElapsedTime(job, now);
+
+        if (command->is_background) {
+            pid_t pid = fork();
+            if (pid < 0) {
+                perror("smash error: fork failed");
+                free(jobs);
+                exit(SMASH_QUIT);
+            }
+            if (pid == 0) {
+                setpgrp();
+                _printJobDetails(job, elapsed);
+                exit(SMASH_SUCCESS);
+            } else {
+                addJob(jobList, pid, command->parsed.name, false);
+                free(jobs);
+                return SMASH_SUCCESS;
+            }
+        } else {
+            _printJobDetails(job, elapsed);
+        }
+    }
+
+    free(jobs);
+    return SMASH_SUCCESS;
+}
+
+
+// Helper: Validate and find the target job
+static Job* _getFgTargetJob(Command* command, JobList* jobList) {
+    if (command->is_background) {
+        fprintf(stderr, "smash error: fg: cannot run in background\n");
+        return NULL;
+    }
+
+    if (command->parsed.arg_count == 0) {
+        if (!jobList || !jobList->head) {
+            fprintf(stderr, "smash error: fg: jobs list is empty\n");
+            return NULL;
+        }
+        return findJobWithMaxId(jobList, 0);
+    }
+
+    if (command->parsed.arg_count == 1) {
+        char* endPtr;
+        int jobId = strtol(command->parsed.args[0], &endPtr, 10);
+        if (*endPtr != '\0') {
+            fprintf(stderr, "smash error: fg: invalid arguments\n");
+            return NULL;
+        }
+        Job* job = findJobById(jobList, jobId);
+        if (!job) {
+            fprintf(stderr, "smash error: fg: job id %d does not exist\n", jobId);
+        }
+        return job;
+    }
+
+    fprintf(stderr, "smash error: fg: invalid arguments\n");
+    return NULL;
+}
+
+// Helper: Resume a stopped job
+static int _resumeStoppedJob(Job* job) {
+    if (job->is_stopped) {
+        if (kill(job->pid, SIGCONT) == -1) {
+            perror("smash error: kill failed");
+            return SMASH_FAIL;
+        }
+        job->is_stopped = 0;
+        job->isFirst = true;
+    }
+    return SMASH_SUCCESS;
+}
+
+// Helper: Handle waiting for the foreground process
+static int _waitForFgProcess(JobList* jobList, Job* job) {
+    int status;
+    while (true) {
+        if (waitpid(fgProcessPid, &status, 0) == -1) {
+            if (errno == EINTR) {
+                removeJob(jobList, job->job_id);
+                return SMASH_FAIL;
+            } else {
+                perror("smash error: waitpid failed");
+                fgProcessPid = -1;
+                exit(1); // match your ERROR_EXIT style
+            }
+        }
+        break;
+    }
+
+    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "smash error: external: invalid command\n");
+    }
+
+    if (WIFEXITED(status) || WIFSIGNALED(status)) {
+        removeJob(jobList, job->job_id);
+    }
+
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? SMASH_SUCCESS : SMASH_FAIL;
+}
+
+// The final _fg implementation
+int _fg(Command* command, JobList* jobList) {
+    Job* targetJob = _getFgTargetJob(command, jobList);
+    if (!targetJob) {
+        return INVALID_COMMAND;
+    }
+
+    printf("[%d] %s\n", targetJob->job_id, targetJob->j_command);
+
+    if (_resumeStoppedJob(targetJob) != SMASH_SUCCESS) {
+        return SMASH_FAIL;
+    }
+
+    fgProcessPid = targetJob->pid;
+    strncpy(fgProcessCmd, targetJob->j_command, sizeof(fgProcessCmd) - 1);
+    fgProcessCmd[sizeof(fgProcessCmd) - 1] = '\0'; // always null-terminate
+
+    return _waitForFgProcess(jobList, targetJob);
+}
+// Helper to free all jobs from the job list
+void freeJobList(JobList* jobList) {
+    Job* current = jobList->head;
+    while (current) {
+        Job* next = current->next;
+        free(current->j_command);  // Assuming j_command was dynamically allocated
+        free(current);
+        current = next;
+    }
+    jobList->head = NULL;
+}
+static void send_signal(pid_t pid, int signal, const char* signal_name) {
+    printf("sending %s... ", signal_name);
+    fflush(stdout);
+
+    if (kill(pid, signal) == -1) {
+        perror("\nsmash error: kill failed");
+    } else {
+        printf("done\n");
+    }
+}
+
+static void terminate_job(JobList* jobList, Job* job) {
+    printf("[%d] %s - ", job->job_id, job->j_command);
+    fflush(stdout);
+
+    send_signal(job->pid, SIGTERM, "SIGTERM");
+
+    // Check if process terminated within 5 seconds
+    time_t start_time = time(NULL);
+    int status;
+    while (difftime(time(NULL), start_time) < 5) {
+        pid_t result = waitpid(job->pid, &status, WNOHANG);
+        if (result > 0) {
+            return removeJob(jobList, job->job_id);
+        }
+        sleep(1);
+    }
+
+    // If still alive, send SIGKILL
+    send_signal(job->pid, SIGKILL, "SIGKILL");
+    removeJob(jobList, job->job_id);
+}
+
+// Helper function to terminate a single job
+//static void terminate_job(JobList* jobList, Job* job) {
+//    printf("[%d] %s - sending SIGTERM... ", job->job_id, job->j_command);
+//    fflush(stdout);
+//
+//    if (kill(job->pid, SIGTERM) == -1) {
+//        perror("\nsmash error: kill failed");
+//        return;
+//    }
+//
+//    int status = 0;
+//    pid_t result = 0;
+//    time_t start = time(NULL);
+//
+//    do {
+//        result = waitpid(job->pid, &status, WNOHANG);
+//        if (result > 0) break;
+//        sleep(1);
+//    } while (difftime(time(NULL), start) < 5);
+//
+//    if (result > 0) {
+//        printf("done\n");
+//    } else {
+//        printf("sending SIGKILL... ");
+//        fflush(stdout);
+//        if (kill(job->pid, SIGKILL) == -1) {
+//            perror("\nsmash error: kill failed");
+//        } else {
+//            printf("done\n");
+//        }
+//        printf("\n");
+//    }
+//
+//    removeJob(jobList, job->job_id);
+//}
+
+// 9. quit command
+int _quit(Command* command, JobList* jobList) {
+    int argc = command->parsed.arg_count;
+    char** argv = command->parsed.args;
+
+    // Validate arguments
+    if (argc > 1) {
+        fprintf(stderr, "smash error: quit: expected 0 or 1 arguments\n");
+        return SMASH_FAIL;
+    }
+    if (argc == 1 && strcmp(argv[0], "kill") != 0) {
+        fprintf(stderr, "smash error: quit: unexpected arguments\n");
+        return SMASH_FAIL;
+    }
+
+    if (argc == 1 && strcmp(argv[0], "kill") == 0) {
+        // Terminate all jobs
+        Job* current = jobList->head;
+        while (current) {
+            Job* next = current->next;  // Save next before modifying the list
+            terminate_job(jobList, current);
+            current = next;
+        }
+    }
+
+    // Free all jobs left (in case no 'kill' was given, or after termination)
+    freeJobList(jobList);
+
+    // Exit smash
+    exit(0);
+}
+
 
