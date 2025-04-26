@@ -107,9 +107,15 @@ Command* parseCommand(char* line);
 
 char* stripWhitespace(char* str);
 
-Job* findJobById(JobList* jobList, int jobId);
+Job* findJobById(JobList* jobList, int jobId);//we can use this in findJobWithMaxId  
 
 void removeJob(JobList* jobList, int jobId);
+int executeCommand(Command* command, JobList* jobList, char** oldPwd);
+int getNextJobId(JobList* jobList);
+void addJob(JobList* jobList, pid_t pid, const char* user_input, bool isStopped);
+Job* findJobWithMaxId(JobList* jobList, int onlyStopped);
+void removeBackgroundFinishedJobs(JobList* jobList);
+int _executeExternal(Command* command, JobList* jobList);
 
 
 #endif //COMMANDS_H
