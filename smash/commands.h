@@ -78,7 +78,8 @@ typedef struct Command {
         char* name;
         char* args[ARGS_NUM_MAX];
         int arg_count;
-    } parsed;
+    } parsed;//command.parsed.args[i]
+
     bool is_background;
 } Command;
 
