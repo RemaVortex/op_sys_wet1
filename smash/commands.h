@@ -100,7 +100,16 @@ typedef struct JobList{
 extern JobList jobList; //global :)
 
 int parseCommandExample(char* line);
+
 void initJobList(JobList* jobList);
+
+Command* parseCommand(char* line);
+
+char* stripWhitespace(char* str);
+
+Job* findJobById(JobList* jobList, int jobId);
+
+void removeJob(JobList* jobList, int jobId);
 
 
 #endif //COMMANDS_H
