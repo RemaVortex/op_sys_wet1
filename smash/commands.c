@@ -145,19 +145,21 @@ Job* findJobById(JobList* jobList, int jobId){
     return NULL;
 }
 
-void removeJob(JobList* jobList, int jobId){
-    if (!jobList){
-        //if I have to return error, I have to check which error to return
+void removeJob(JobList* jobList, int jobId) {
+    if (!jobList) {
+        return;
     }
-    Job* current = jobList->head;
-    Job* prev = jobList->head;
 
-    while (current != NULL){
-        if (current->job_id == jobId){
-            if (prev){
-                prev->next = current->next;
-            } else{
+    Job* current = jobList->head;
+    Job* prev = NULL;
+
+    while (current != NULL) {
+        if (current->job_id == jobId) {
+            if (prev == NULL) {
+                // We're deleting the head
                 jobList->head = current->next;
+            } else {
+                prev->next = current->next;
             }
             free(current->j_command);
             free(current);
@@ -592,15 +594,11 @@ int _fg(Command* command, JobList* jobList) {
 }
 // Helper to free all jobs from the job list
 void freeJobList(JobList* jobList) {
-    Job* current = jobList->head;
-    while (current) {
-        Job* next = current->next;
-        free(current->j_command);  // Assuming j_command was dynamically allocated
-        free(current);
-        current = next;
+    while (jobList->head != NULL) {
+        removeJob(jobList, jobList->head->job_id);
     }
-    jobList->head = NULL;
 }
+
 static void send_signal(pid_t pid, int signal, const char* signal_name) {
     printf("sending %s... ", signal_name);
     fflush(stdout);
