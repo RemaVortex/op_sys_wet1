@@ -123,7 +123,7 @@ int _executeExternal(Command* command, JobList* jobList);
 int _showpid(Command* command, JobList* jobList, char** oldPwd);
 int _pwd(Command* command, JobList* jobList, char** oldPwd);
 int _cd(Command* command, JobList* jobList, char** oldPwd);
-int _printJobList(Command* command, JobList* jobList, char** oldPwd);
+int _jobs(Command* command, JobList* jobList, char** oldPwd);
 int _killJob(Command* command, JobList* jobList, char** oldPwd);
 int _fg(Command* command, JobList* jobList, char** oldPwd);
 int _bg(Command* command, JobList* jobList, char** oldPwd);
