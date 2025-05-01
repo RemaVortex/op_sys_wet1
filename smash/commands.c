@@ -660,7 +660,7 @@ static void _printJobDetails(Job* job, double elapsed) {
            job->is_stopped ? "(stopped)" : "");
 }
 
-int _printJobList(Command* command, JobList* jobList, char** oldPwd) {
+int _jobs(Command* command, JobList* jobList, char** oldPwd) {
     if (command->parsed.arg_count > 0) {
         fprintf(stderr, "smash error: jobs: expected 0 arguments\n");
         return INVALID_COMMAND;
